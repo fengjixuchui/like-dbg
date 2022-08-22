@@ -1,9 +1,16 @@
 android/
 android-kernel/
+android54/
 kernel_root/
+src/
+io/rootfs/
+img/
+io/filesystem*
 linux-*
 requirements.txt
 start_kgdb.py
 README.md
 config.ini
-.git
+.git/
+.github/
+.like-dbg/

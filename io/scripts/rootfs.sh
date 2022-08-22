@@ -11,7 +11,7 @@ if [ ! -f /proc/sys/fs/binfmt_misc/register ]; then
     mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc
 fi
 # Reset any qemu handlers...
-find /proc/sys/fs/binfmt_misc -type f -name 'qemu-*' -exec sh -c 'echo -1 > {}' \;
+find /proc/sys/fs/binfmt_misc -type f -name 'qemu-*' -exec sh -c 'echo -1 > $1' shell {} \;
 
 # Grab qemu binfmt register script
 wget https://raw.githubusercontent.com/qemu/qemu/master/scripts/qemu-binfmt-conf.sh && \
@@ -22,7 +22,7 @@ pushd /io
 
 MNT=rootfs
 SEEK=2047
-PKGS="build-essential,vim,openssh-server,make,sudo,curl,tar,gcc,libc6-dev,time,strace,less,psmisc,selinux-utils,policycoreutils,checkpolicy,selinux-policy-default,firmware-atheros"
+PKGS="build-essential,openssh-server,sudo,curl,tar,time,less,psmisc,openssl"
 ARCH=$(uname -m)
 DIST=bullseye
 ROOTFS_NAME=rootfs
@@ -51,6 +51,11 @@ while true; do
         -n | --name)
             # Sets the name of the rootfs
             ROOTFS_NAME=$2
+            shift 2
+            ;;
+        -p | --packages)
+            # Set packages to install
+            PKGS=$2
             shift 2
             ;;
         -*)
@@ -84,21 +89,21 @@ esac
 
 # Foreign architecture
 FOREIGN=false
-if [ $ARCH != $(uname -m) ]; then
+if [ "$ARCH" != "$(uname -m)" ]; then
     # i386 on an x86_64 host is exempted, as we can run i386 binaries natively
-    if [ $ARCH != "i386" -o $(uname -m) != "x86_64" ]; then
+    if [ "$ARCH" != "i386" ] || [ "$(uname -m)" != "x86_64" ]; then
         FOREIGN=true
     fi
 fi
 
 if [ $FOREIGN = "true" ]; then
     # Check for according qemu static binary
-    if ! which qemu-$ARCH-static; then
+    if ! which qemu-"$ARCH"-static; then
         echo "Please install qemu static binary for architecture $ARCH (package 'qemu-user-static' on Debian/Ubuntu/Fedora)"
         exit 1
     fi
     # Check for according binfmt entry
-    if [ ! -r /proc/sys/fs/binfmt_misc/qemu-$ARCH ]; then
+    if [ ! -r /proc/sys/fs/binfmt_misc/qemu-"$ARCH" ]; then
         echo "binfmt entry /proc/sys/fs/binfmt_misc/qemu-$ARCH does not exist"
         exit 1
     fi
@@ -118,17 +123,24 @@ fi
 
 # riscv64 is hosted in the debian-ports repository
 # debian-ports doesn't include non-free, so we exclude firmware-atheros
-if [ $DEBARCH == "riscv64" ]; then
+if [ "$DEBARCH" == "riscv64" ]; then
     DEBOOTSTRAP_PARAMS="--keyring /usr/share/keyrings/debian-ports-archive-keyring.gpg --exclude firmware-atheros $DEBOOTSTRAP_PARAMS http://deb.debian.org/debian-ports"
 fi
-echo $DEBOOTSTRAP_PARAMS
-sudo debootstrap $DEBOOTSTRAP_PARAMS
+#sudo debootstrap $DEBOOTSTRAP_PARAMS
+eval "sudo debootstrap $DEBOOTSTRAP_PARAMS"
 
 # 2. debootstrap stage: only necessary if target != host architecture
 if [ $FOREIGN = "true" ]; then
-    sudo cp -av $(which qemu-$ARCH-static) $MNT$(which qemu-$ARCH-static)
+    sudo cp -av "$(which qemu-"$ARCH"-static)" "$MNT$(which qemu-"$ARCH"-static)"
     sudo chroot $MNT /bin/bash -c "/debootstrap/debootstrap --second-stage"
-    rm -rf $MNT$(which qemu-$ARCH-static)
+fi
+
+# 3. Create a non-root user
+pass=$(openssl passwd -1 user)
+sudo chroot $MNT /bin/bash -c "groupadd -g 1000 user && useradd -u 1000 -g 1000 -s /bin/bash -m -p \"$pass\" user"
+
+if [ $FOREIGN = "true" ]; then
+    rm -rf "$MNT$(which qemu-"$ARCH"-static)"
 fi
 
 # Set some defaults and enable promtless ssh to the machine for root.
@@ -143,16 +155,16 @@ echo 'binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc defaults 0 0' | sudo tee 
 echo -en "127.0.0.1\tlocalhost $ROOTFS_NAME\n" | sudo tee $MNT/etc/hosts
 echo "nameserver 8.8.8.8" | sudo tee -a $MNT/etc/resolve.conf
 echo "$ROOTFS_NAME" | sudo tee $MNT/etc/hostname
-ssh-keygen -f $ROOTFS_NAME.id_rsa -t rsa -N ''
+yes | ssh-keygen -f "$ROOTFS_NAME.id_rsa" -t rsa -N ''
 sudo mkdir -p $MNT/root/.ssh/
-cat $ROOTFS_NAME.id_rsa.pub | sudo tee $MNT/root/.ssh/authorized_keys
+cat "$ROOTFS_NAME.id_rsa.pub" | sudo tee $MNT/root/.ssh/authorized_keys > /dev/null
 
 # Build disk image
-dd if=/dev/zero of=$ROOTFS_NAME bs=1M seek=$SEEK count=1
-sudo mkfs.ext4 -F $ROOTFS_NAME
+dd if=/dev/zero of="$ROOTFS_NAME" bs=1M seek=$SEEK count=1
+sudo mkfs.ext4 -F "$ROOTFS_NAME"
 sudo mkdir -p /mnt/$MNT
-sudo mount -o loop $ROOTFS_NAME /mnt/$MNT
+sudo mount -o loop "$ROOTFS_NAME" /mnt/$MNT
 sudo cp -a $MNT/. /mnt/$MNT/.
 sudo umount /mnt/$MNT
-sudo rm -rf $MNT
-chmod 755 $ROOTFS_NAME*
+sudo rm -rf "$MNT"
+find "$ROOTFS_NAME"* -print0 | xargs -0 chmod 0755 

@@ -1,6 +1,8 @@
 loguru
+flake8
+platformdirs
 fabric
 black
-docker 
+docker
 tqdm
 requests
