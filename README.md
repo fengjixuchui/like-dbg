@@ -37,11 +37,16 @@ On the upside, despite its early stages, a couple of useful features are already
   * Minimal host system requirements due to dockerization of every step
   * A single config (`config.ini`) to allow free customization
   * CTF runner that's specifically designed to handle Linux kernel exploitation challenges
+    * `ctf/misc` that houses some nifty scripts to aid in CTFs
   * Code quality measures:
     * [black](https://github.com/psf/black) formatter for python code
     * [flake8](https://github.com/PyCQA/flake8) linter for all python code
     * [shellcheck](https://github.com/koalaman/shellcheck) linter for shell scripts
     * [hadolint](https://github.com/hadolint/hadolint) linter for the Dockerfiles
+  * Operating system agnostic, meaning it should run just fine on:
+    * Debian/Ubuntu
+    * Arch Linux/Manjaro
+    * Fedora
 * Kernel builder:
   * Multi-arch: `x86_64`, `arm64`
   * Choose between `gcc` and `clang` to build the kernel
@@ -71,11 +76,21 @@ On the upside, despite its early stages, a couple of useful features are already
 
 To get started, you have to ensure to have the following requirements set up in your system:
 
-* `make`
 * `docker`
 * `tmux`
 * `python>=3.9`
   * `venv`
+
+It is recommended to not run this as the `root` user, e.g. for testing purposes on a VPS.
+It may work fine but in general I highly encourage creating a dedicated non-root user to put in the `docker` and `sudo` group!
+
+### Optional
+
+This section covers tools that are *not* required to run LIKE-DBG but are nice to have and assist heavily when debugging or writing an exploit
+
+* [musl-gcc](https://www.musl-libc.org/how.html)
+* [ctags](https://github.com/universal-ctags/ctags)
+* [ropr](https://github.com/Ben-Lichtman/ropr)  
 
 ## Configuration
 

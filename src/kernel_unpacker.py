@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 import shutil
-import subprocess as sp
 import tarfile
 from pathlib import Path
 
 from loguru import logger
 from tqdm import tqdm
 
-from .misc import cfg_setter, is_reuse, new_context
+from .misc import cfg_setter, is_reuse
 
 
 # +-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-+
@@ -16,54 +15,35 @@ from .misc import cfg_setter, is_reuse, new_context
 # +-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-+
 class KernelUnpacker:
     def __init__(self, p: Path, **kwargs) -> None:
-        cfg_setter(self, ["kernel_general"])
-        self.kernel_root = Path(self.kernel_root)
+        cfg_setter(self, ["general"])
         self.archive = p
-        self.ex_name = Path(".".join(self.archive.name.split(".")[:-2]))  # FIXME only works for formats like .tar.gz
+        self.ex_name = ".".join(self.archive.name.split(".")[:-2])  # FIXME only works for formats like .tar.gz
+        if not Path(self.kernel_root).exists():
+            Path(self.kernel_root).mkdir()
+        self.kernel_root = Path(self.kernel_root) / (self.ex_name + f"_{self.arch}")
         self.dst_content = None
-        self.history = Path(".hist")
         self.skip_prompts = kwargs.get("skip_prompts", False)
 
-    def _is_new(self):
-        if self.history.exists():
-            entry = self.history.read_text()
-            if entry == self.archive:
-                return 0
-        else:
-            self.history.write_text(self.archive)
-        return 1
-
-    def _make_clean(self):
-        logger.debug("Same kernel version already unpacked. Running 'make clean' just in case...")
-        with new_context(self.kernel_root):
-            sp.run("make clean", shell=True)
-
     def _is_dest_empty(self) -> bool:
-        if self.kernel_root.exists():
-            self.content = [x.name for x in self.kernel_root.iterdir()]
-            if self.content:
-                return False
-            else:
-                return True
+        self.content = [x.name for x in self.kernel_root.iterdir()]
+        if self.content:
+            return False
         else:
             return True
 
     def _is_vmlinux(self) -> int:
         if "vmlinux" in self.content:
             return 1
-        else:
-            return 0
+        return 0
 
     def _reuse_existing_vmlinux(self) -> int:
-        if not is_reuse("vmlinux"):
-            self._purge(self.kernel_root)
-            self._unpack_targz()
-            return 0
-        return 1
+        if is_reuse(f"{self.kernel_root}/vmlinux"):
+            return 1
+        return 0
 
     def _unpack_targz(self) -> None:
         if not tarfile.is_tarfile(self.archive):
-            logger.error("Invalid archive format. Exiting...")
+            logger.critical("Invalid archive format. Exiting...")
             exit(-1)
 
         logger.info("Unpacking kernel archive...")
@@ -71,27 +51,31 @@ class KernelUnpacker:
             members = t.getmembers()
             for member in tqdm(iterable=members, total=len(members)):
                 t.extract(member)
-        self.ex_name.rename(self.kernel_root)
+        Path(self.ex_name).rename(self.kernel_root)
 
     @staticmethod
     def _purge(p: Path) -> None:
-        logger.info("Purging unclean kernel build environment...")
+        logger.debug("Purging unclean kernel build environment...")
         shutil.rmtree(p, ignore_errors=True)
 
-    def run(self) -> int:
-        if not self._is_dest_empty():
+    def run(self) -> dict:
+        res = {"kroot": self.kernel_root}
+        if not self.kernel_root.exists():
+            logger.debug(f"{self.kernel_root} does not exist. Unpacking fresh kernel...")
+            self._unpack_targz()
+            return res | {"status_code": 0}
+        elif not self._is_dest_empty():
             if self._is_vmlinux():
-                if self.skip_prompts:
-                    logger.info("Re-using existing vmlinux")
-                    return 1
-                if self._reuse_existing_vmlinux():
-                    return 1
+                if self.skip_prompts or self._reuse_existing_vmlinux():
+                    logger.info(f"Re-using existing {self.kernel_root}/vmlinux")
+                    return res | {"status_code": 1}
+                else:
+                    return res | {"status_code": 0, "assume_dirty": True}
             else:
-                self._make_clean()
-                return 0
-        if self._is_new():
+                logger.debug(f"{self.kernel_root} does exist, but contains no kernel. Assuming dirty directory...")
+                return res | {"status_code": 0, "assume_dirty": True}
+        else:
+            logger.debug(f"{self.kernel_root} does exist, but is empty. Purging it and unpacking fresh kernel...")
             self._purge(self.kernel_root)
             self._unpack_targz()
-        else:
-            self._make_clean()
-        return 0
+            return res | {"status_code": 0}

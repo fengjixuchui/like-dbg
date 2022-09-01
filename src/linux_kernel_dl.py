@@ -19,9 +19,11 @@ class KernelDownloader:
         cfg_setter(self, ["kernel_dl"])
         self.commit = self._set_commit()
         self.choice = self._set_choice()
-        logger.info(f"Using kernel with (tag/commit) {self.choice}")
+        logger.info(f"Using kernel with (tag/commit/version) {self.choice}")
         self.dl_uri = self._set_dl_uri()
-        self.archive = Path(f"linux-{self.choice}.tar.gz")
+        if not Path(self.kernel_dl_path).exists():
+            Path(self.kernel_dl_path).mkdir()
+        self.archive = Path(self.kernel_dl_path) / f"linux-{self.choice}.tar.gz"
         logger.debug(f"Kernel snap: {self.dl_uri}")
 
     def _set_commit(self):
@@ -41,7 +43,7 @@ class KernelDownloader:
             logger.debug(f"Found latest commit: {commit}")
             return commit
         else:
-            logger.error("Resolving latest commit")
+            logger.critical("Resolving latest commit")
             exit(-1)
 
     def _set_choice(self):
@@ -64,7 +66,7 @@ class KernelDownloader:
 
     def is_present(self) -> bool:
         if Path(self.archive).exists():
-            logger.info("Kernel archive already exists locally. Skipping download...")
+            logger.debug("Kernel archive already exists locally. Skipping download...")
             return True
         else:
             return False
@@ -75,7 +77,7 @@ class KernelDownloader:
             urllib.request.urlretrieve(self.dl_uri, filename=self.archive, reporthook=t.update_to)
             t.total = t.n
 
-    def run(self):
+    def run(self) -> Path:
         if not self.is_present():
             self.download_kernel_archive()
         return self.archive

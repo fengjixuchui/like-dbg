@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import re
+import time
+from os import getuid
 from pathlib import Path
 
 import docker
@@ -16,12 +18,13 @@ from .misc import adjust_arch, cfg_setter, canadian_cross
 class KernelBuilder(DockerRunner):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        cfg_setter(self, ["kernel_general", "kernel_builder", "general", "kernel_builder_docker"])
+        cfg_setter(self, ["kernel_builder", "general", "kernel_builder_docker"], exclude_keys=["kernel_root"], cherry_pick={"debuggee": ["kvm"]})
         self.cc = f"CC={self.compiler}" if self.compiler else ""
         self.llvm_flag = "" if "gcc" in self.cc else "LLVM=1"
         self.cli = docker.APIClient(base_url=self.docker_sock)
         self.guarantee_ssh(self.ssh_dir)
         self.tag = self.tag + f"_{self.arch}"
+        self.dirty = kwargs.get("assume_dirty", False)
         self.buildargs = {
             "USER": self.user,
             "CC": self.compiler,
@@ -31,23 +34,31 @@ class KernelBuilder(DockerRunner):
             "ARCH": self.arch,
         }
 
-    def _run_ssh(self, cmd: str) -> int:
-        return self.ssh_conn.run(f"cd {self.docker_mnt}/{self.kernel_root} && {cmd}").exited
+    @staticmethod
+    def make_sudo(cmd: str) -> str:
+        if getuid() == 0:
+            return f"sudo {cmd}"
+        else:
+            return cmd
 
-    def _apply_patches(self):
+    def _run_ssh(self, cmd: str) -> int:
+        cmd = self.make_sudo(cmd)
+        return self.ssh_conn.run(f"cd {self.docker_mnt}/{self.kernel_root} && {cmd}", echo=True).exited
+
+    def _apply_patches(self, is_sudo: bool):
         if self.patch_dir and Path(self.patch_dir).exists():
             patch_files = [x for x in Path(self.patch_dir).iterdir()]
             if patch_files:
-                logger.debug(f"Applying patches...: {patch_files}")
                 for pfile in patch_files:
-                    if self._run_ssh(f"patch -p1 < ../{self.patch_dir}/{pfile.name}") != 0:
-                        logger.error(f"Patching: {pfile}")
+                    logger.debug(f"Patching: {pfile}")
+                    if self._run_ssh(f"patch -p1 < ../../{self.patch_dir}/{pfile.name}", is_sudo) != 0:
+                        logger.critical(f"Patching: {pfile}")
                         exit(-1)
 
     def _build_mrproper(self):
         self._run_ssh(f"{self.cc} ARCH={self.arch} make mrproper")
 
-    def _build_arch(self):
+    def _build_arch(self) -> None:
         # TODO check how we need to sanitize the [general] config arch field to reflect the make options
         # All i know is it works if arch is x86_64
         if self.arch == "x86_64":
@@ -58,7 +69,7 @@ class KernelBuilder(DockerRunner):
     def _build_kvm_guest(self):
         self._run_ssh(f"{self.cc} {self.llvm_flag} ARCH={self.arch} make kvm_guest.config")
 
-    def _configure_kernel(self):
+    def _configure_kernel(self) -> None:
         if self.mode == "syzkaller":
             params = self.syzkaller_args
         elif self.mode == "generic":
@@ -80,16 +91,29 @@ class KernelBuilder(DockerRunner):
         logger.debug(params)
         return params
 
-    def _configure_custom(self):
+    def _configure_custom(self) -> str:
         params = "-e " + " -e ".join(self.enable_args.split())
         params += " -d " + " -d ".join(self.disable_args.split())
         return params
+
+    def _make_clean(self) -> None:
+        logger.debug("Running 'make clean' just in case...")
+        self._run_ssh("make clean")
 
     def _make(self):
         self._run_ssh(f"{self.cc} ARCH={self.arch} {self.llvm_flag} make -j$(nproc) all")
         self._run_ssh(f"{self.cc} ARCH={self.arch} {self.llvm_flag} make -j$(nproc) modules")
 
-    def run_container(self):
+    def _wait_for_container(self) -> None:
+        logger.info("Waiting for Container to be up...")
+        while True:
+            c = self.cli.inspect_container(self.container.id)
+            if c["State"]["Health"]["Status"] != "healthy":
+                time.sleep(1)
+            else:
+                break
+
+    def run_container(self) -> None:
         try:
             self.container = self.client.containers.run(
                 self.image,
@@ -98,11 +122,15 @@ class KernelBuilder(DockerRunner):
                 detach=True,
                 tty=True,
             )
+            self._wait_for_container()
             self.init_ssh()
+            if self.dirty:
+                self._make_clean()
             self._build_mrproper()
             self._apply_patches()
             self._build_arch()
-            self._build_kvm_guest()
+            if self.kvm:
+                self._build_kvm_guest()
             self._configure_kernel()
             self._make()
         except Exception as e:
@@ -111,11 +139,12 @@ class KernelBuilder(DockerRunner):
         else:
             logger.info("Successfully build the kernel")
             if self.arch == "x86_64":
-                self._run_ssh(f"cd arch/{self.arch}/boot/ && ln -s bzImage Image")
+                cmd = self.make_sudo("ln -s bzImage Image")
+                self.ssh_conn.run(f"cd {self.docker_mnt}/{self.kernel_root}/arch/{self.arch}/boot && {cmd}", echo=True)
         finally:
             self.stop_container()
 
-    def run(self):
+    def run(self) -> None:
         logger.info("Building kernel. This may take a while...")
-        self.image = self.get_image()
+        self.check_existing()
         super().run()

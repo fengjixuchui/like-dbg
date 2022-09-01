@@ -3,7 +3,7 @@
 #   https://raw.githubusercontent.com/google/syzkaller/master/tools/create-image.sh
 # -e exit on error
 # -u Write to stderr when trying to expand a variable that does not exist
-# -x Write to stderr for tracing 
+# -x Write to stderr for tracing
 set -eux
 
 # Check if binfmt_misc is ready to go
@@ -14,38 +14,39 @@ fi
 find /proc/sys/fs/binfmt_misc -type f -name 'qemu-*' -exec sh -c 'echo -1 > $1' shell {} \;
 
 # Grab qemu binfmt register script
-wget https://raw.githubusercontent.com/qemu/qemu/master/scripts/qemu-binfmt-conf.sh && \
-chmod 777 qemu-binfmt-conf.sh && \
-./qemu-binfmt-conf.sh --qemu-suffix "-static" --qemu-path "/usr/bin"
+wget https://raw.githubusercontent.com/qemu/qemu/master/scripts/qemu-binfmt-conf.sh &&
+    chmod 777 qemu-binfmt-conf.sh &&
+    ./qemu-binfmt-conf.sh --qemu-suffix "-static" --qemu-path "/usr/bin"
 
 pushd /io
 
 MNT=rootfs
 SEEK=2047
-PKGS="build-essential,openssh-server,sudo,curl,tar,time,less,psmisc,openssl"
+PKGS="build-essential,openssh-server,sudo,curl,tar,time,less,psmisc,openssl,plymouth,file"
 ARCH=$(uname -m)
 DIST=bullseye
 ROOTFS_NAME=rootfs
+USER=user
 
 while true; do
-    if [ $# -eq 0 ];then
-	echo $#
-	break
+    if [ $# -eq 0 ]; then
+        echo $#
+        break
     fi
     case "$1" in
         -a | --arch)
             # Sets the architecture
-    	    ARCH=$2
+            ARCH=$2
             shift 2
             ;;
         -d | --distribution)
             # Sets the debian distribution, which defaults to bullseye right now
-    	    DIST=$2
+            DIST=$2
             shift 2
             ;;
         -s | --seek)
             # Sets the size of the file system, default 5G
-	        SEEK=$(($2 - 1))
+            SEEK=$(($2 - 1))
             shift 2
             ;;
         -n | --name)
@@ -58,11 +59,16 @@ while true; do
             PKGS=$2
             shift 2
             ;;
+        -u | --user)
+            # The non-root user
+            USER=$2
+            shift 2
+            ;;
         -*)
             echo "Error: Unknown option: $1" >&2
             exit 1
             ;;
-        *)  # No more options
+        *) # No more options
             break
             ;;
     esac
@@ -114,7 +120,6 @@ sudo rm -rf $MNT
 sudo mkdir -p $MNT
 sudo chmod 0755 $MNT
 
-
 # 1. debootstrap stage
 DEBOOTSTRAP_PARAMS="--arch=$DEBARCH --include=$PKGS --components=main,contrib,non-free $DIST $MNT"
 if [ $FOREIGN = "true" ]; then
@@ -136,8 +141,8 @@ if [ $FOREIGN = "true" ]; then
 fi
 
 # 3. Create a non-root user
-pass=$(openssl passwd -1 user)
-sudo chroot $MNT /bin/bash -c "groupadd -g 1000 user && useradd -u 1000 -g 1000 -s /bin/bash -m -p \"$pass\" user"
+PASS=$(perl -e 'print crypt($ARGV[0], "password")' "$USER")
+sudo chroot $MNT /bin/bash -c "groupadd -g 1000 $USER && useradd -u 1000 -g 1000 -s /bin/bash -m -p $PASS $USER"
 
 if [ $FOREIGN = "true" ]; then
     rm -rf "$MNT$(which qemu-"$ARCH"-static)"
@@ -149,12 +154,20 @@ echo 'T0:23:respawn:/sbin/getty -L ttyS0 115200 vt100' | sudo tee -a $MNT/etc/in
 printf '\nauto eth0\niface eth0 inet dhcp\n' | sudo tee -a $MNT/etc/network/interfaces
 echo '/dev/root / ext4 defaults 0 0' | sudo tee -a $MNT/etc/fstab
 echo 'debugfs /sys/kernel/debug debugfs defaults 0 0' | sudo tee -a $MNT/etc/fstab
-echo 'securityfs /sys/kernel/security securityfs defaults 0 0' | sudo tee -a $MNT/etc/fstab
-echo 'configfs /sys/kernel/config/ configfs defaults 0 0' | sudo tee -a $MNT/etc/fstab
-echo 'binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc defaults 0 0' | sudo tee -a $MNT/etc/fstab
+# echo 'securityfs /sys/kernel/security securityfs defaults 0 0' | sudo tee -a $MNT/etc/fstab
+# echo 'configfs /sys/kernel/config/ configfs defaults 0 0' | sudo tee -a $MNT/etc/fstab
+if [ $FOREIGN = "false" ]; then
+    echo 'binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc defaults 0 0' | sudo tee -a $MNT/etc/fstab
+fi
 echo -en "127.0.0.1\tlocalhost $ROOTFS_NAME\n" | sudo tee $MNT/etc/hosts
 echo "nameserver 8.8.8.8" | sudo tee -a $MNT/etc/resolve.conf
 echo "$ROOTFS_NAME" | sudo tee $MNT/etc/hostname
+dircolors -p > $MNT/home/"$USER"/.dircolors
+echo "export TERM=vt100" >> $MNT/home/"$USER"/.bashrc
+echo "stty cols 128 rows 192" >> $MNT/home/"$USER"/.bashrc
+cp $MNT/home/"$USER"/.bashrc $MNT/home/"$USER"/.dircolors $MNT/root
+echo 'eval "$(dircolors ~/.dircolors)" > /dev/null' >> $MNT/root/.bashrc
+printf "+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-+\nWelcome to your LIKE-DBG session :). Happy hacking!\n+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-+\n" > $MNT/etc/motd
 yes | ssh-keygen -f "$ROOTFS_NAME.id_rsa" -t rsa -N ''
 sudo mkdir -p $MNT/root/.ssh/
 cat "$ROOTFS_NAME.id_rsa.pub" | sudo tee $MNT/root/.ssh/authorized_keys > /dev/null
@@ -167,4 +180,4 @@ sudo mount -o loop "$ROOTFS_NAME" /mnt/$MNT
 sudo cp -a $MNT/. /mnt/$MNT/.
 sudo umount /mnt/$MNT
 sudo rm -rf "$MNT"
-find "$ROOTFS_NAME"* -print0 | xargs -0 chmod 0755 
+find "$ROOTFS_NAME"* -print0 | xargs -0 chmod 0755
