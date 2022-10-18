@@ -4,6 +4,7 @@
 [![Build Status: flake8](https://github.com/PyCQA/flake8/workflows/main/badge.svg)](https://github.com/0xricksanchez/like-dbg/actions?query=workflow%3Aflake8)
 [![Build Status: shellcheck](https://github.com/koalaman/shellcheck/actions/workflows/build.yml/badge.svg)](https://github.com/0xricksanchez/like-dbg/actions?query=workflow%3Ashellcheck)
 [![Build Status: hadolint](https://img.shields.io/badge/hadolint-passing-brightgreen)](https://github.com/0xricksanchez/like-dbg/actions?query=workflow%3Ahadolint)
+[![codecov](https://codecov.io/gh/0xricksanchez/like-dbg/branch/main/graph/badge.svg?token=SXF37MH4X6)](https://codecov.io/gh/0xricksanchez/like-dbg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://tldrlegal.com/license/mit-license)
 [![GitHub Release](https://img.shields.io/github/release/0xricksanchez/like-dbg.svg)](https://github.com/0xricksanchez/like-dbg/releases/)  
 
@@ -35,7 +36,8 @@ On the upside, despite its early stages, a couple of useful features are already
 
 * General:
   * Minimal host system requirements due to dockerization of every step
-  * A single config (`config.ini`) to allow free customization
+  * An easy to grasp `configs/user.ini` config that allows highly customizable sessions
+    * Or provide different configurations for different debgging setups via the command-line!
   * CTF runner that's specifically designed to handle Linux kernel exploitation challenges
     * `ctf/misc` that houses some nifty scripts to aid in CTFs
   * Code quality measures:
@@ -51,14 +53,16 @@ On the upside, despite its early stages, a couple of useful features are already
   * Multi-arch: `x86_64`, `arm64`
   * Choose between `gcc` and `clang` to build the kernel
   * Configuration modes:
-    * generic-mode
-    * syzkaller-mode
-    * custom-mode
+    * generic-mode,
+    * syzkaller-mode,
+    * custom-mode, or
+    * provide a usable kernel config
   * Fine-granular version control to build from:
     * Commit hash
     * Release tag (e.g.: 5.10-rc)
     * Major-Minor-Patch (e.g.: 5.10.77)
   * Ability to automatically apply patch files
+  * Basic ability to add custom kernel modules
 * Root file system builder:
   * Powered by [debootstrap](https://wiki.debian.org/Debootstrap)
   * Automatic generation of file system that matches the kernels architecture
@@ -101,7 +105,8 @@ However, all the ones to customize the environment to your needs should be self-
 
 ## Usage
 
-Once you're set with the configuration, the usage depends on your scenario.
+Once you're set with writing/adapting a configuration, the usage depends on your scenario.
+The easiest way to get started, which is based on the `configs/user.ini` configuration is the following:
 
 ```sh
 tmux -f .tmux.conf
@@ -109,16 +114,40 @@ python3 -m venv .like-dbg
 source .like-dbg/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
-# If you want to build a Linux kernel image from scratch for a specific version to debug, go ahead and run:
+# This checks out a kernel, builds it, creates a root file system and starts the debugger and debuggee eventually
 ./start_kgdb.py
-# If you want to try a CTF challenge where you were given a compressed Linux Image and a root filesystem try:
-./start_kgdb.py --ctf --env <Image> <RootFS>
 ```
 
-## Showcase
+### Extended Usage:
 
-As a first-time user, you will see a lot of docker building messages race across the screen.
-In the end, your experience should look similar to this:
+```sh
+# If you want to try a CTF challenge where you were given a (compressed) Linux Image and a root filesystem try:
+./start_kgdb.py --ctf <Image> <RootFS>
+
+# If you want to kill the current debugging session
+./start_kgdb.py -k
+
+# If you want to provide a custom 'user.ini' for a specific debugging setup
+./start_kgdb.py -c <path_to_cfg> [other_args]
+
+# If you want to test some partial functionality of LIKE-DBG
+# Stage 1: Download Kernel
+# Stage 2: Stage 1 & unpack Kernel
+# Stage 3: Stage 2 & build Kernel
+# Stage 4: Only build a root file system
+# Stage 5: Stage 3+4 & start debuggee
+./start_kgdb.py -p <stage_nr>
+
+# Update all containers
+./start_kgdb.py -u
+```
+
+### Examples
+
+The `examples` subdirectory houses samples on how `LIKE_DBG` may aid you in specific kernel debugging tasks.
+Each example contains a dedicated `README.md` as well that contains the necessary information to reproduce the examples.
+
+## Showcase
 
 ![img/example.png](img/example.png)
 
