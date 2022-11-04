@@ -71,7 +71,7 @@ On the upside, despite its early stages, a couple of useful features are already
     * the Debian release version to base everything on
 * Debuggee:
   * Powered by [QEMU](https://github.com/qemu/qemu)
-  * Customization of QEMU runtime options from within the `config.ini`:
+  * Customization of QEMU runtime options from within the `configs/*.ini` files.
 * Debugger:
   * Powered by [GDB (multiarch)](https://sourceware.org/gdb/) + [GEF](https://github.com/hugsy/gef) and [GEF-extras](https://github.com/hugsy/gef-extras)
   * Allow users to specify GDB script in `io/scripts/gdb_script` to allow a scenario-tailored debugging experience
@@ -90,7 +90,7 @@ It may work fine but in general I highly encourage creating a dedicated non-root
 
 ### Optional
 
-This section covers tools that are *not* required to run LIKE-DBG but are nice to have and assist heavily when debugging or writing an exploit
+This section covers tools that are *not* required to run LIKE-DBG but are nice to have and assist heavily when debugging or writing an exploit.
 
 * [musl-gcc](https://www.musl-libc.org/how.html)
 * [ctags](https://github.com/universal-ctags/ctags)
@@ -99,7 +99,7 @@ This section covers tools that are *not* required to run LIKE-DBG but are nice t
 ## Configuration
 
 Fine-tuning the kernel debugging experience is one of the goals of this project.
-Currently, all tunable options are exposed in the `config.ini`.
+Currently, all tunable options are exposed in the two configuration files: `configs/system.ini` and `configs/user.ini`.
 Some fields are recommended to not be altered as they're mainly for development reasons.
 However, all the ones to customize the environment to your needs should be self-explanatory as all of them are labeled with a brief comment.
 
